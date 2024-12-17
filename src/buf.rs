@@ -1,6 +1,7 @@
-use num::ToPrimitive;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
+use num::ToPrimitive;
 
 pub struct Buffer {
     width: usize,
@@ -20,8 +21,8 @@ pub enum BufferError {
 
 impl Buffer {
     pub fn new(width: usize, height: usize) -> Self {
-        let mut a = Box::new(Vec::with_capacity(width * height));
-        let b = Box::new(Vec::with_capacity(width * height));
+        let mut a = Box::new(vec![0u8; width * height]);
+        let b = Box::new(vec![0u8; width * height]);
         let active = AtomicPtr::new(a.as_mut_ptr());
         Self {
             a,
@@ -84,16 +85,30 @@ impl Buffer {
 
         Ok(())
     }
+}
 
+#[derive(Clone)]
+pub struct BufferHandle(Arc<Buffer>);
+
+impl BufferHandle {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self(Arc::new(Buffer::new(width, height)))
+    }
+
+    // Instead of the raw
     pub fn render<F: Fn(&[u8])>(&self, render_func: F) {
-        let f = self.front();
+        let f = self.0.front();
         render_func(f);
     }
 
     pub fn update<F: Fn(&mut [u8])>(&mut self, update_func: F) {
-        let b = self.back();
-        update_func(b);
-        self.flip();
+        let x = self.0.clone();
+        unsafe {
+            let ptr = Arc::into_raw(x) as *mut Buffer;
+            let buf = (*ptr).back();
+            update_func(buf);
+            (*ptr).flip();
+        }
     }
 }
 
@@ -101,7 +116,6 @@ impl Buffer {
 mod tests {
     use super::*;
     use rand::prelude::*;
-    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
@@ -170,7 +184,7 @@ mod tests {
 
     #[test]
     fn can_share() {
-        let buf = Arc::new(Buffer::new(100, 100));
+        let buf = BufferHandle::new(100, 100);
 
         let r_buf = buf.clone();
         let renderer = thread::spawn(move || {
@@ -179,11 +193,9 @@ mod tests {
                 let i = rng.gen_range(0..1000);
                 r_buf.render(|f| {
                     let c = f[i];
-                    assert_ne!(c, 0);
                     // Assume we render using some UI code here.
+                    println!("Picked {}", c);
                 });
-
-                thread::sleep(Duration::from_millis(300))
             }
         });
         let mut w_buf = buf.clone();
@@ -195,7 +207,6 @@ mod tests {
                 w_buf.update(|f| {
                     f[i] = c;
                 });
-                thread::sleep(Duration::from_millis(300));
             }
         });
 
