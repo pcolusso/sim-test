@@ -172,9 +172,10 @@ mod tests {
         let renderer = thread::spawn(move || {
             let mut rng = rand::thread_rng();
             for _ in 0..1000 {
-                let i = rng.gen_range(0..1000);
+                let x = rng.gen_range(0..100);
+                let y = rng.gen_range(0..100);
                 r_buf.render(|f| {
-                    let c = f.get(100, 100);
+                    let c = f.get(x, y);
                     // Assume we render using some UI code here.
                     println!("Picked {:?}", c);
                 });
@@ -184,10 +185,11 @@ mod tests {
         let worker = thread::spawn(move || {
             let mut rng = rand::thread_rng();
             for _ in 0..1000 {
-                let i = rng.gen_range(0..1000);
+                let x = rng.gen_range(0..100);
+                let y = rng.gen_range(0..100);
                 let c: u8 = rng.gen();
                 w_buf.update(|f| {
-                    f.set(100, 100, 32);
+                    f.set(x, y, c).unwrap();
                 });
             }
         });

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+encase = { version = "0.10.0", features = ["glam"] }
+glam = "0.29.2"
 num = "0.4.3"
 pollster = { version = "0.4.0", features = ["macro"] }
 rand = "0.8.5"
