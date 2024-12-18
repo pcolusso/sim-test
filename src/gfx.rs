@@ -1,8 +1,10 @@
-use encase::{ShaderType};
+use encase::ShaderType;
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
-use wgpu::{BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration, Texture};
+use wgpu::{
+    BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration, Texture,
+};
 use winit::application::ApplicationHandler;
 use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
@@ -15,7 +17,7 @@ use crate::MyBuf;
 struct State {
     pub cursor_pos: glam::Vec2,
     pub dimensions: glam::Vec2,
-    pub time: f32
+    pub time: f32,
 }
 
 impl State {
@@ -37,7 +39,7 @@ struct Context<'a> {
     bind_group: BindGroup,
     uniform_buffer: Buffer,
     texture: Texture,
-    staging: Buffer
+    staging: Buffer,
 }
 
 pub struct App<'a> {
@@ -54,7 +56,13 @@ impl<'a> App<'a> {
         let ctx = None;
         let state = State::default();
         let start = Instant::now();
-        Self { window, ctx, state, start, buf }
+        Self {
+            window,
+            ctx,
+            state,
+            start,
+            buf,
+        }
     }
 }
 
@@ -207,7 +215,7 @@ impl<'a> Context<'a> {
             uniform_buffer,
             bind_group,
             texture,
-            staging
+            staging,
         }
     }
 }
@@ -246,11 +254,17 @@ impl<'a> ApplicationHandler for App<'a> {
                     // On macos the window needs to be redrawn manually after resizing
                     self.window.as_ref().unwrap().request_redraw();
                 }
-            },
-            WindowEvent::CursorMoved { device_id, position } => {
-                self.state.cursor_pos = Vec2{ x: position.x as f32, y: position.y as f32 };
+            }
+            WindowEvent::CursorMoved {
+                device_id,
+                position,
+            } => {
+                self.state.cursor_pos = Vec2 {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                };
                 self.window.as_ref().unwrap().request_redraw();
-            },
+            }
             WindowEvent::RedrawRequested => {
                 let elapsed = self.start.elapsed();
                 self.state.time = elapsed.as_secs_f32();
@@ -264,38 +278,66 @@ impl<'a> ApplicationHandler for App<'a> {
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
-                    ctx.queue.write_buffer(&ctx.uniform_buffer, 0, &self.state.as_wgsl_bytes().expect("uhh"));
+                    ctx.queue.write_buffer(
+                        &ctx.uniform_buffer,
+                        0,
+                        &self.state.as_wgsl_bytes().expect("uhh"),
+                    );
                     println!("Uniform: {:?}", &self.state);
 
-                    self.buf.render(|f| {
-                        ctx.queue.write_buffer(&ctx.staging, 0, &f.buf);
-                    });
+                    // self.buf.render(|f| {
+                    //     ctx.queue.write_buffer(&ctx.staging, 0, &f.buf);
+                    // });
 
                     let mut encoder = ctx
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                    encoder.copy_buffer_to_texture(
-                        wgpu::ImageCopyBuffer {
-                            buffer: &ctx.staging,
-                            layout: wgpu::ImageDataLayout {
+                    self.buf.render(|f| {
+                        ctx.queue.write_texture(
+                            wgpu::ImageCopyTexture {
+                                texture: &ctx.texture,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: wgpu::TextureAspect::All,
+                            },
+                            &f.buf,
+                            wgpu::ImageDataLayout {
                                 offset: 0,
                                 bytes_per_row: Some(100),
-                                rows_per_image: Some(100)
+                                rows_per_image: Some(100),
                             },
-                        },
-                        wgpu::ImageCopyTexture {
-                            texture: &ctx.texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All
-                        },
-                        wgpu::Extent3d {
-                            width: 100,
-                            height: 100,
-                            depth_or_array_layers: 1,
-                        }
-                    );
+                            wgpu::Extent3d {
+                                width: 100,
+                                height: 100,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+                    });
+
+                    // Try write_texture instead?
+
+                    // encoder.copy_buffer_to_texture(
+                    //     wgpu::ImageCopyBuffer {
+                    //         buffer: &ctx.staging,
+                    //         layout: wgpu::ImageDataLayout {
+                    //             offset: 0,
+                    //             bytes_per_row: Some(100),
+                    //             rows_per_image: Some(100)
+                    //         },
+                    //     },
+                    //     wgpu::ImageCopyTexture {
+                    //         texture: &ctx.texture,
+                    //         mip_level: 0,
+                    //         origin: wgpu::Origin3d::ZERO,
+                    //         aspect: wgpu::TextureAspect::All
+                    //     },
+                    //     wgpu::Extent3d {
+                    //         width: 100,
+                    //         height: 100,
+                    //         depth_or_array_layers: 1,
+                    //     }
+                    // );
 
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
