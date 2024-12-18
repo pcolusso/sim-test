@@ -1,4 +1,4 @@
-use encase::ShaderType;
+use encase::{ShaderSize, ShaderType};
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,12 +8,34 @@ use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+// impl ShaderSize for BufferHandle {
+//     const SHADER_SIZE: std::num::NonZeroU64 = Self::METADATA.min_size().0;
+// }
+
+// impl ShaderType for BufferHandle {
+//     const METADATA: Metadata<Self::ExtraMetadata> = None;
+//     const UNIFORM_COMPAT_ASSERT: fn() = { || };
+
+//     fn min_size() -> std::num::NonZeroU64 {
+//         Self::METADATA.min_size().0
+//     }
+
+//     fn size(&self) -> std::num::NonZeroU64 {
+//         Self::METADATA.min_size().0
+//     }
+
+//     fn assert_uniform_compat() {
+//         Self::UNIFORM_COMPAT_ASSERT();
+//     }
+// }
+
 // Uniform buffer.
 #[derive(Debug, ShaderType, Default)] // this baby can fit so many derive macros
 struct State {
     pub cursor_pos: glam::Vec2,
     pub dimensions: glam::Vec2,
-    pub time: f32
+    pub time: f32,
+    //pub buffer_handle: BufferHandle
 }
 
 impl State {
@@ -22,6 +44,8 @@ impl State {
         buffer.write(self)?;
         Ok(buffer.into_inner())
     }
+
+
 }
 
 // UHH NOT THE STATE

@@ -1,7 +1,8 @@
+use num::{Num, ToPrimitive};
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
+use std::usize;
 use thiserror::Error;
-use num::ToPrimitive;
 
 #[derive(Error, Debug)]
 pub enum BufferError {
@@ -11,21 +12,28 @@ pub enum BufferError {
     BadIndex,
 }
 
+
 /// Provides simple x,y indexing into a buffer.
-pub struct TwoDeeBuffer {
+pub struct SimpleTwoDeeBuffer {
     width: usize,
     height: usize,
-    buf: Vec<u8>
+    buf: Vec<u8>,
 }
 
-impl TwoDeeBuffer  {
-    pub fn new(width: usize, height: usize) -> Self {
+trait TwoDeeBuffer<B: Num + Copy> {
+    fn new(width: usize, height: usize) -> Self;
+    fn get<T: ToPrimitive>(&self, x: T, y: T) -> Result<B, BufferError>;
+    fn set<T: ToPrimitive>(&mut self, x: T, y: T, v: B) -> Result<(), BufferError>;
+}
+
+impl TwoDeeBuffer<u8> for SimpleTwoDeeBuffer {
+    fn new(width: usize, height: usize) -> Self {
         let buf = vec![0u8; width * height];
         Self { width, height, buf }
     }
 
     /// Safely retrieves a value from the buffer, for the given x,y coords.
-    pub fn get<T: ToPrimitive>(&self, x: T, y: T) -> Result<u8, BufferError> {
+    fn get<T: ToPrimitive>(&self, x: T, y: T) -> Result<u8, BufferError> {
         let x = x.to_usize().ok_or(BufferError::BadIndex)?;
         let y = y.to_usize().ok_or(BufferError::BadIndex)?;
         let i = y * self.width + x;
@@ -34,7 +42,7 @@ impl TwoDeeBuffer  {
     }
 
     /// Safely sets a value to the buffer, for the given x,y coords.
-    pub fn set<T: ToPrimitive>(&mut self, x: T, y: T, v: u8) -> Result<(), BufferError> {
+    fn set<T: ToPrimitive>(&mut self, x: T, y: T, v: u8) -> Result<(), BufferError> {
         let x = x.to_usize().ok_or(BufferError::BadIndex)?;
         let y = y.to_usize().ok_or(BufferError::BadIndex)?;
         let i = y * self.width + x;
@@ -49,18 +57,21 @@ impl TwoDeeBuffer  {
     }
 }
 
+
 /// Double buffer implementation.
-struct Flipper {
-    a: Box<TwoDeeBuffer>,
-    b: Box<TwoDeeBuffer>,
-    active: AtomicPtr<TwoDeeBuffer>
+struct Flipper<F: TwoDeeBuffer<u8>> {
+    a: Box<F>,
+    b: Box<F>,
+    active: AtomicPtr<F>,
 }
 
-impl Flipper {
+type SimpleFlipper = Flipper<SimpleTwoDeeBuffer>;
+
+impl<F: TwoDeeBuffer<u8>> Flipper<F> {
     /// Internally creates 2x TwoDeeBuffers.
     pub fn new(width: usize, height: usize) -> Self {
-        let mut a = Box::new(TwoDeeBuffer::new(width, height));
-        let b = Box::new(TwoDeeBuffer::new(width, height));
+        let mut a = Box::new(F::new(width, height));
+        let b = Box::new(F::new(width, height));
         let active = AtomicPtr::new(a.as_mut());
 
         Self { a, b, active }
@@ -78,7 +89,7 @@ impl Flipper {
     }
 
     /// Buffer that is safe to read from. Use this for rendering.
-    pub fn front(&self) -> &TwoDeeBuffer {
+    pub fn front(&self) -> &F {
         let ptr = self.active.load(Ordering::Acquire);
         // SAFETY: Enforced by the wrapper one level up, after every mutation the buffer is flipped,
         // therefor we can assure nothing is writing to this, and thus is safe to read from.
@@ -86,7 +97,7 @@ impl Flipper {
     }
 
     /// Buffer we process on. Used for updates.
-    pub fn back(&mut self) -> &mut TwoDeeBuffer {
+    pub fn back(&mut self) -> &mut F {
         let active_ptr = self.active.load(Ordering::Relaxed);
         if active_ptr == self.a.as_mut() {
             &mut self.b
@@ -98,7 +109,7 @@ impl Flipper {
 
 /// Thread-safe handle to the double buffer
 #[derive(Clone)]
-pub struct BufferHandle(Arc<Flipper>);
+pub struct BufferHandle(Arc<Flipper<SimpleTwoDeeBuffer>>);
 
 impl BufferHandle {
     pub fn new(width: usize, height: usize) -> Self {
@@ -106,16 +117,18 @@ impl BufferHandle {
     }
 
     // Uses the front buffer, which is safe for read-only access.
-    pub fn render<F: Fn(&TwoDeeBuffer)>(&self, render_func: F) {
+    pub fn render<F: Fn(&SimpleTwoDeeBuffer)>(&self, render_func: F) {
         let f = self.0.front();
         render_func(f);
     }
 
     // Uses the back buffer, which is not read from.
-    pub fn update<F: Fn(&mut TwoDeeBuffer)>(&mut self, update_func: F) {
+    pub fn update<F: Fn(&mut SimpleTwoDeeBuffer)>(&mut self, update_func: F) {
         let x = self.0.clone();
+        // SAFETY: Operations only ever occur on the back buffer. Buffers are swapped via
+        // an atomic pointer, via flip.
         unsafe {
-            let ptr = Arc::into_raw(x) as *mut Flipper;
+            let ptr = Arc::into_raw(x) as *mut Flipper<SimpleTwoDeeBuffer>;
             let buf = (*ptr).back();
             update_func(buf);
             (*ptr).flip();
@@ -131,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_buffer_flip() {
-        let mut buffer = Flipper::new(5, 5);
+        let mut buffer = SimpleFlipper::new(5, 5);
         let initial_active = buffer.active.load(Ordering::Relaxed);
         buffer.flip();
         let flipped_active = buffer.active.load(Ordering::Relaxed);
@@ -140,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_buffer_front_and_back() {
-        let mut buffer = Flipper::new(3, 3);
+        let mut buffer = SimpleFlipper::new(3, 3);
 
         buffer.back().set(1, 1, 42).unwrap();
 
@@ -149,18 +162,18 @@ mod tests {
 
         buffer.flip();
 
-        assert_eq!(buffer.front().get(1,1).unwrap(), 42);
+        assert_eq!(buffer.front().get(1, 1).unwrap(), 42);
     }
 
     #[test]
     fn test_buffer_out_of_bounds() {
-        let buffer = TwoDeeBuffer::new(5, 5);
+        let buffer = SimpleTwoDeeBuffer::new(5, 5);
         assert!(matches!(buffer.get(5, 5), Err(BufferError::OutOfBounds)));
     }
 
     #[test]
     fn test_buffer_bad_index() {
-        let buffer = TwoDeeBuffer::new(5, 5);
+        let buffer = SimpleTwoDeeBuffer::new(5, 5);
         assert!(matches!(buffer.get(-1, 0), Err(BufferError::BadIndex)));
     }
 
@@ -199,50 +212,50 @@ mod tests {
     }
 
     #[test]
-        fn test_concurrent_access() {
-            let buf = BufferHandle::new(100, 100);
+    fn test_concurrent_access() {
+        let buf = BufferHandle::new(100, 100);
 
-            // Spin up multiple render threads
-            let mut renderers = vec![];
-            for _ in 0..5 {
-                let r_buf = buf.clone();
-                renderers.push(thread::spawn(move || {
-                    let mut rng = rand::thread_rng();
-                    for _ in 0..1000 {
-                        let x = rng.gen_range(0..100);
-                        let y = rng.gen_range(0..100);
-                        r_buf.render(|buf| {
-                            let _ = buf.get(x, y).unwrap();
-                            // Assume 'front' buffer is being rendered/displayed
-                        });
-                    }
-                }));
-            }
-
-            // Spin up multiple update threads
-            let mut workers = vec![];
-            for _ in 0..5 {
-                let mut w_buf = buf.clone();
-                workers.push(thread::spawn(move || {
-                    let mut rng = rand::thread_rng();
-                    for _ in 0..1000 {
-                        let x = rng.gen_range(0..100);
-                        let y = rng.gen_range(0..100);
-                        let c = rng.gen();
-                        w_buf.update(|buf| {
-                            buf.set(x, y, c).unwrap();
-                        });
-                    }
-                }));
-            }
-
-            // Join all threads to ensure they complete
-            for renderer in renderers {
-                renderer.join().unwrap();
-            }
-
-            for worker in workers {
-                worker.join().unwrap();
-            }
+        // Spin up multiple render threads
+        let mut renderers = vec![];
+        for _ in 0..5 {
+            let r_buf = buf.clone();
+            renderers.push(thread::spawn(move || {
+                let mut rng = rand::thread_rng();
+                for _ in 0..1000 {
+                    let x = rng.gen_range(0..100);
+                    let y = rng.gen_range(0..100);
+                    r_buf.render(|buf| {
+                        let _ = buf.get(x, y).unwrap();
+                        // Assume 'front' buffer is being rendered/displayed
+                    });
+                }
+            }));
         }
+
+        // Spin up multiple update threads
+        let mut workers = vec![];
+        for _ in 0..5 {
+            let mut w_buf = buf.clone();
+            workers.push(thread::spawn(move || {
+                let mut rng = rand::thread_rng();
+                for _ in 0..1000 {
+                    let x = rng.gen_range(0..100);
+                    let y = rng.gen_range(0..100);
+                    let c = rng.gen();
+                    w_buf.update(|buf| {
+                        buf.set(x, y, c).unwrap();
+                    });
+                }
+            }));
+        }
+
+        // Join all threads to ensure they complete
+        for renderer in renderers {
+            renderer.join().unwrap();
+        }
+
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
 }

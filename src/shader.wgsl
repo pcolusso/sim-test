@@ -41,6 +41,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Calculate the distance between the fragment and the cursor
     let distance = distance(normalized_coord, normalized_pos);
 
-    let gradient = vec3<f32>(0.3 * normalized_pos.x, 0.3 * normalized_pos.y, asin(app_state.t));
+    let gradient = vec3<f32>(0.3 * distance, 0.3 * distance, 1.0);
     return vec4<f32>(gradient, 1.0);
 }
