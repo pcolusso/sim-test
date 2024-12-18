@@ -1,4 +1,4 @@
-use encase::{ShaderSize, ShaderType};
+use encase::{ShaderType};
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,26 +8,9 @@ use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-// impl ShaderSize for BufferHandle {
-//     const SHADER_SIZE: std::num::NonZeroU64 = Self::METADATA.min_size().0;
-// }
+use crate::fixed_buf::DoubleBuf;
 
-// impl ShaderType for BufferHandle {
-//     const METADATA: Metadata<Self::ExtraMetadata> = None;
-//     const UNIFORM_COMPAT_ASSERT: fn() = { || };
-
-//     fn min_size() -> std::num::NonZeroU64 {
-//         Self::METADATA.min_size().0
-//     }
-
-//     fn size(&self) -> std::num::NonZeroU64 {
-//         Self::METADATA.min_size().0
-//     }
-
-//     fn assert_uniform_compat() {
-//         Self::UNIFORM_COMPAT_ASSERT();
-//     }
-// }
+type MyBuf = DoubleBuf<100, 100>;
 
 // Uniform buffer.
 #[derive(Debug, ShaderType, Default)] // this baby can fit so many derive macros

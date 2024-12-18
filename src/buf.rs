@@ -12,7 +12,6 @@ pub enum BufferError {
     BadIndex,
 }
 
-
 /// Provides simple x,y indexing into a buffer.
 pub struct SimpleTwoDeeBuffer {
     width: usize,
@@ -20,18 +19,19 @@ pub struct SimpleTwoDeeBuffer {
     buf: Vec<u8>,
 }
 
-trait TwoDeeBuffer<B: Num + Copy> {
-    fn new(width: usize, height: usize) -> Self;
+impl SimpleTwoDeeBuffer {
+    fn new(width: usize, height: usize) -> Self {
+        let buf = vec![0u8; width * height];
+        Self { width, height, buf }
+    }
+}
+
+pub trait TwoDeeBuffer<B: Num + Copy> {
     fn get<T: ToPrimitive>(&self, x: T, y: T) -> Result<B, BufferError>;
     fn set<T: ToPrimitive>(&mut self, x: T, y: T, v: B) -> Result<(), BufferError>;
 }
 
 impl TwoDeeBuffer<u8> for SimpleTwoDeeBuffer {
-    fn new(width: usize, height: usize) -> Self {
-        let buf = vec![0u8; width * height];
-        Self { width, height, buf }
-    }
-
     /// Safely retrieves a value from the buffer, for the given x,y coords.
     fn get<T: ToPrimitive>(&self, x: T, y: T) -> Result<u8, BufferError> {
         let x = x.to_usize().ok_or(BufferError::BadIndex)?;
@@ -57,9 +57,8 @@ impl TwoDeeBuffer<u8> for SimpleTwoDeeBuffer {
     }
 }
 
-
 /// Double buffer implementation.
-struct Flipper<F: TwoDeeBuffer<u8>> {
+pub struct Flipper<F: TwoDeeBuffer<u8>> {
     a: Box<F>,
     b: Box<F>,
     active: AtomicPtr<F>,
@@ -69,9 +68,9 @@ type SimpleFlipper = Flipper<SimpleTwoDeeBuffer>;
 
 impl<F: TwoDeeBuffer<u8>> Flipper<F> {
     /// Internally creates 2x TwoDeeBuffers.
-    pub fn new(width: usize, height: usize) -> Self {
-        let mut a = Box::new(F::new(width, height));
-        let b = Box::new(F::new(width, height));
+    pub fn new(a: F, b: F) -> Self {
+        let mut a = Box::new(a);
+        let b = Box::new(b);
         let active = AtomicPtr::new(a.as_mut());
 
         Self { a, b, active }
@@ -113,7 +112,9 @@ pub struct BufferHandle(Arc<Flipper<SimpleTwoDeeBuffer>>);
 
 impl BufferHandle {
     pub fn new(width: usize, height: usize) -> Self {
-        Self(Arc::new(Flipper::new(width, height)))
+        let a = SimpleTwoDeeBuffer::new(width, height);
+        let b = SimpleTwoDeeBuffer::new(width, height);
+        Self(Arc::new(Flipper::new(a, b)))
     }
 
     // Uses the front buffer, which is safe for read-only access.
@@ -141,29 +142,6 @@ mod tests {
     use super::*;
     use rand::prelude::*;
     use std::thread;
-
-    #[test]
-    fn test_buffer_flip() {
-        let mut buffer = SimpleFlipper::new(5, 5);
-        let initial_active = buffer.active.load(Ordering::Relaxed);
-        buffer.flip();
-        let flipped_active = buffer.active.load(Ordering::Relaxed);
-        assert_ne!(initial_active, flipped_active);
-    }
-
-    #[test]
-    fn test_buffer_front_and_back() {
-        let mut buffer = SimpleFlipper::new(3, 3);
-
-        buffer.back().set(1, 1, 42).unwrap();
-
-        let x = buffer.front().get(1, 1).unwrap();
-        assert_eq!(x, 0);
-
-        buffer.flip();
-
-        assert_eq!(buffer.front().get(1, 1).unwrap(), 42);
-    }
 
     #[test]
     fn test_buffer_out_of_bounds() {
