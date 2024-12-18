@@ -1,7 +1,7 @@
 struct State {
     pos: vec2<f32>,
     dim: vec2<f32>,
-    t: f32
+    t: f32,
 }
 
 struct VertexInput {

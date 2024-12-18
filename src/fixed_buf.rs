@@ -7,7 +7,7 @@ pub struct FixedTwoDeeBuffer<C: Num + Copy, const W: usize, const H: usize> {
     // It'd be neato if we could have this as a fixed-size array
     // but we can't use those generic values in const expressions.
     // despite the fact, they are very const
-    buf: Vec<C>,
+    pub buf: Vec<C>,
 }
 
 impl<C: Num + Copy, const W: usize, const H: usize>  FixedTwoDeeBuffer<C, W, H> {
@@ -26,6 +26,10 @@ impl<C: Num + Copy, const W: usize, const H: usize>  FixedTwoDeeBuffer<C, W, H> 
 
     pub const fn size() -> usize {
         size_of::<C>() * W * H
+    }
+
+    pub const fn len() -> usize {
+        W * H
     }
 }
 
@@ -55,6 +59,8 @@ impl<C: Num + Copy, const W: usize, const H: usize> TwoDeeBuffer<C> for FixedTwo
     }
 }
 
+// We could use a seperate ref that has render, and another that has reader, so that the user
+// has a harder time to misues the buffers.
 #[derive(Clone)]
 pub struct DoubleBuf<const W: usize, const H: usize>(Arc<Flipper<FixedTwoDeeBuffer<u8, W, H>>>);
 

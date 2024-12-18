@@ -2,23 +2,20 @@ use encase::{ShaderType};
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
-use wgpu::{BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration};
+use wgpu::{BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration, Texture};
 use winit::application::ApplicationHandler;
 use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::fixed_buf::DoubleBuf;
-
-type MyBuf = DoubleBuf<100, 100>;
+use crate::MyBuf;
 
 // Uniform buffer.
-#[derive(Debug, ShaderType, Default)] // this baby can fit so many derive macros
+#[derive(Debug, Default, ShaderType)] // this baby can fit so many derive macros
 struct State {
     pub cursor_pos: glam::Vec2,
     pub dimensions: glam::Vec2,
-    pub time: f32,
-    //pub buffer_handle: BufferHandle
+    pub time: f32
 }
 
 impl State {
@@ -27,8 +24,6 @@ impl State {
         buffer.write(self)?;
         Ok(buffer.into_inner())
     }
-
-
 }
 
 // UHH NOT THE STATE
@@ -40,7 +35,27 @@ struct Context<'a> {
     render_pipeline: RenderPipeline,
     queue: Queue,
     bind_group: BindGroup,
-    uniform_buffer: Buffer
+    uniform_buffer: Buffer,
+    texture: Texture,
+    staging: Buffer
+}
+
+pub struct App<'a> {
+    window: Option<Arc<Window>>, // AHHH I SEE, ARCS ARE TAXATION
+    ctx: Option<Context<'a>>,
+    state: State,
+    start: std::time::Instant,
+    buf: crate::MyBuf,
+}
+
+impl<'a> App<'a> {
+    pub fn new(buf: crate::MyBuf) -> Self {
+        let window = None;
+        let ctx = None;
+        let state = State::default();
+        let start = Instant::now();
+        Self { window, ctx, state, start, buf }
+    }
 }
 
 // https://github.com/rust-windowing/winit/discussions/3667#discussioncomment-9329312
@@ -123,6 +138,30 @@ impl<'a> Context<'a> {
             }],
         });
 
+        // Create the texure
+        let texture_size = wgpu::Extent3d {
+            width: 100,
+            height: 100,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("u8 Texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // Need to copy into this.
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: 10000 as wgpu::BufferAddress, // TODO: Properly handle
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&bind_group_layout],
@@ -166,25 +205,10 @@ impl<'a> Context<'a> {
             render_pipeline,
             queue,
             uniform_buffer,
-            bind_group
+            bind_group,
+            texture,
+            staging
         }
-    }
-}
-
-pub struct App<'a> {
-    window: Option<Arc<Window>>, // AHHH I SEE, ARCS ARE TAXATION
-    ctx: Option<Context<'a>>,
-    state: State,
-    start: std::time::Instant
-}
-
-impl<'a> App<'a> {
-    pub fn new() -> Self {
-        let window = None;
-        let ctx = None;
-        let state = State::default();
-        let start = Instant::now();
-        Self { window, ctx, state, start }
     }
 }
 
@@ -243,9 +267,36 @@ impl<'a> ApplicationHandler for App<'a> {
                     ctx.queue.write_buffer(&ctx.uniform_buffer, 0, &self.state.as_wgsl_bytes().expect("uhh"));
                     println!("Uniform: {:?}", &self.state);
 
+                    self.buf.render(|f| {
+                        ctx.queue.write_buffer(&ctx.staging, 0, &f.buf);
+                    });
+
                     let mut encoder = ctx
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                    encoder.copy_buffer_to_texture(
+                        wgpu::ImageCopyBuffer {
+                            buffer: &ctx.staging,
+                            layout: wgpu::ImageDataLayout {
+                                offset: 0,
+                                bytes_per_row: Some(100),
+                                rows_per_image: Some(100)
+                            },
+                        },
+                        wgpu::ImageCopyTexture {
+                            texture: &ctx.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All
+                        },
+                        wgpu::Extent3d {
+                            width: 100,
+                            height: 100,
+                            depth_or_array_layers: 1,
+                        }
+                    );
+
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: None,
