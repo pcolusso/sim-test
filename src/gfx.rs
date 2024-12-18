@@ -9,8 +9,7 @@ use winit::application::ApplicationHandler;
 use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
-
-use crate::MyBuf;
+use crate::TwoDeeBuffer;
 
 // Uniform buffer.
 #[derive(Debug, Default, ShaderType)] // this baby can fit so many derive macros
@@ -118,34 +117,6 @@ impl<'a> Context<'a> {
             mapped_at_creation: false,
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("mah bind group"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        // holy boilerplate
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &uniform_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            }],
-        });
-
         // Create the texure
         let texture_size = wgpu::Extent3d {
             width: 100,
@@ -158,10 +129,83 @@ impl<'a> Context<'a> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Uint,
+            format: wgpu::TextureFormat::Rgba8Uint,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        // holy boilerplate
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mah bind group"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &uniform_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
         // Need to copy into this.
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer"),
@@ -283,7 +327,7 @@ impl<'a> ApplicationHandler for App<'a> {
                         0,
                         &self.state.as_wgsl_bytes().expect("uhh"),
                     );
-                    println!("Uniform: {:?}", &self.state);
+                    //println!("Uniform: {:?}", &self.state);
 
                     // self.buf.render(|f| {
                     //     ctx.queue.write_buffer(&ctx.staging, 0, &f.buf);
@@ -294,6 +338,7 @@ impl<'a> ApplicationHandler for App<'a> {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                     self.buf.render(|f| {
+                        println!("Sending, {}", f.get(0, 0).unwrap());
                         ctx.queue.write_texture(
                             wgpu::ImageCopyTexture {
                                 texture: &ctx.texture,
@@ -301,15 +346,15 @@ impl<'a> ApplicationHandler for App<'a> {
                                 origin: wgpu::Origin3d::ZERO,
                                 aspect: wgpu::TextureAspect::All,
                             },
-                            &f.buf,
+                            bytemuck::cast_slice(&f.buf),
                             wgpu::ImageDataLayout {
                                 offset: 0,
-                                bytes_per_row: Some(100),
-                                rows_per_image: Some(100),
+                                bytes_per_row: Some(f.row_size() as u32),
+                                rows_per_image: Some(f.height() as u32),
                             },
                             wgpu::Extent3d {
-                                width: 100,
-                                height: 100,
+                                width: f.width() as u32,
+                                height: f.height() as u32,
                                 depth_or_array_layers: 1,
                             },
                         );

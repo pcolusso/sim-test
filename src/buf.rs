@@ -1,4 +1,5 @@
 use num::{Num, ToPrimitive};
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
 use std::usize;
@@ -58,22 +59,30 @@ impl TwoDeeBuffer<u8> for SimpleTwoDeeBuffer {
 }
 
 /// Double buffer implementation.
-pub struct Flipper<F: TwoDeeBuffer<u8>> {
+pub struct Flipper<F, T>
+where
+    T: Num + Copy,
+    F: TwoDeeBuffer<T>
+{
     a: Box<F>,
     b: Box<F>,
     active: AtomicPtr<F>,
+    _marker: PhantomData<T>
 }
 
-type SimpleFlipper = Flipper<SimpleTwoDeeBuffer>;
-
-impl<F: TwoDeeBuffer<u8>> Flipper<F> {
+impl<F, T> Flipper<F, T>
+where
+    T: Num + Copy,
+    F: TwoDeeBuffer<T>
+{
     /// Internally creates 2x TwoDeeBuffers.
     pub fn new(a: F, b: F) -> Self {
         let mut a = Box::new(a);
         let b = Box::new(b);
         let active = AtomicPtr::new(a.as_mut());
+        let _marker = PhantomData::default();
 
-        Self { a, b, active }
+        Self { a, b, active, _marker }
     }
 
     /// Flip front and back, to be called after every processing step.
@@ -83,13 +92,14 @@ impl<F: TwoDeeBuffer<u8>> Flipper<F> {
         if current == self.a.as_mut() {
             self.active.store(self.b.as_mut(), Ordering::Release);
         } else {
-            self.active.store(self.b.as_mut(), Ordering::Release);
+            self.active.store(self.a.as_mut(), Ordering::Release);
         }
     }
 
     /// Buffer that is safe to read from. Use this for rendering.
     pub fn front(&self) -> &F {
         let ptr = self.active.load(Ordering::Acquire);
+        println!("front ptr is {:p}", ptr);
         // SAFETY: Enforced by the wrapper one level up, after every mutation the buffer is flipped,
         // therefor we can assure nothing is writing to this, and thus is safe to read from.
         unsafe { &*ptr }
@@ -98,6 +108,7 @@ impl<F: TwoDeeBuffer<u8>> Flipper<F> {
     /// Buffer we process on. Used for updates.
     pub fn back(&mut self) -> &mut F {
         let active_ptr = self.active.load(Ordering::Relaxed);
+        println!("back ptr is {:p}", active_ptr);
         if active_ptr == self.a.as_mut() {
             &mut self.b
         } else {
@@ -108,7 +119,7 @@ impl<F: TwoDeeBuffer<u8>> Flipper<F> {
 
 /// Thread-safe handle to the double buffer
 #[derive(Clone)]
-pub struct BufferHandle(Arc<Flipper<SimpleTwoDeeBuffer>>);
+pub struct BufferHandle(Arc<Flipper<SimpleTwoDeeBuffer, u8>>);
 
 impl BufferHandle {
     pub fn new(width: usize, height: usize) -> Self {
@@ -129,7 +140,7 @@ impl BufferHandle {
         // SAFETY: Operations only ever occur on the back buffer. Buffers are swapped via
         // an atomic pointer, via flip.
         unsafe {
-            let ptr = Arc::into_raw(x) as *mut Flipper<SimpleTwoDeeBuffer>;
+            let ptr = Arc::into_raw(x) as *mut Flipper<SimpleTwoDeeBuffer, u8>;
             let buf = (*ptr).back();
             update_func(buf);
             (*ptr).flip();

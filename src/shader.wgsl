@@ -17,6 +17,10 @@ struct VertexOutput {
 @binding(0)
 var<uniform> app_state: State;
 
+@group(0)
+@binding(1)
+var myTexture: texture_2d<u32>;
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var vertices = array<vec2<f32>, 3>(
@@ -33,14 +37,23 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Normalize the fragment coordinates
-    let normalized_coord = in.position.xy / app_state.dim;
-    let normalized_pos = app_state.pos / app_state.dim;
-    // let normalized_coord = in.coord.xy / vec2<f32>(800.0, 600.0);
+    let c = textureLoad(myTexture, vec2(0, 0), 0);
+    let color: vec4<f32> = vec4<f32>(
+        f32(c.r) / 255.0,
+        f32(c.g) / 255.0,
+        f32(c.b) / 255.0,
+        f32(c.a) / 255.0
+    );
+    return color;
 
-    // Calculate the distance between the fragment and the cursor
-    let distance = distance(normalized_coord, normalized_pos);
+    // // Normalize the fragment coordinates
+    // let normalized_coord = in.position.xy / app_state.dim;
+    // let normalized_pos = app_state.pos / app_state.dim;
+    // // let normalized_coord = in.coord.xy / vec2<f32>(800.0, 600.0);
 
-    let gradient = vec3<f32>(0.3 * distance, 0.3 * distance, 1.0);
-    return vec4<f32>(gradient, 1.0);
+    // // Calculate the distance between the fragment and the cursor
+    // let distance = distance(normalized_coord, normalized_pos);
+
+    // let gradient = vec3<f32>(0.3 * distance, 0.3 * distance, 1.0);
+    // return vec4<f32>(gradient, 1.0);
 }
