@@ -9,7 +9,7 @@ struct VertexInput {
 }
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @builtin(position) pos: vec4<f32>,
     @location(0) coord: vec2<f32>
 };
 
@@ -30,7 +30,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     );
     var out: VertexOutput;
     out.coord = vertices[in.vertex_index];
-    out.position = vec4<f32>(out.coord, 0.0, 1.0);
+    out.pos = vec4<f32>(out.coord, 0.0, 1.0);
 
     return out;
 }
@@ -55,18 +55,22 @@ fn unpack_bgra5551(packed: u32) -> vec4f {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let c = gridData[0];
-    let color: vec4<f32> = unpack_bgra5551(c);
-    return color;
+    let cell_size = 7.0;
+    let border_size = 3.0;
+    let grid_width = 100.0; // TODO: can we instead derive this from the buf, assuming it's square, or via uniform?
 
-    // // Normalize the fragment coordinates
-    // let normalized_coord = in.position.xy / app_state.dim;
-    // let normalized_pos = app_state.pos / app_state.dim;
-    // // let normalized_coord = in.coord.xy / vec2<f32>(800.0, 600.0);
+    let t_w = (grid_width * cell_size) + (grid_width * border_size); // +1?
 
-    // // Calculate the distance between the fragment and the cursor
-    // let distance = distance(normalized_coord, normalized_pos);
+    // ATTEMPT: being slick
+    let total_dimensions: vec2<f32> = vec2(t_w, t_w); // square for now.
+    let offset: vec2<f32> = (app_state.dim - total_dimensions) / 2.0;
+    let grid_pos = in.pos.xy - offset;
+    let outside: vec2<bool> = grid_pos < vec2<f32>(0.0) || grid_pos >= total_dimensions;
 
-    // let gradient = vec3<f32>(0.3 * distance, 0.3 * distance, 1.0);
-    // return vec4<f32>(gradient, 1.0);
+    // render background
+    if (any(outside)) { // THIS IS COOL
+        return vec4(0.0, 1.0, 0.0, 1.0);
+    }
+
+    return vec4(1.0, 1.0, 1.0, 1.0);
 }
