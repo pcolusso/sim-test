@@ -19,7 +19,7 @@ var<uniform> app_state: State;
 
 @group(0)
 @binding(1)
-var myTexture: texture_2d<u32>;
+var<storage> gridData: array<u32>;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
@@ -35,15 +35,28 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+fn unpack_bgra5551(packed: u32) -> vec4f {
+    // Extract each channel (5 bits each for BGR, 1 bit for A)
+    let b = (packed & 0x1Fu);         // bits 0-4
+    let g = (packed >> 5u) & 0x1Fu;   // bits 5-9
+    let r = (packed >> 10u) & 0x1Fu;  // bits 10-14
+    let a = (packed >> 15u) & 0x1u;   // bit 15
+
+    // Convert to normalized float [0,1]
+    // For 5-bit channels, divide by 31 (2^5 - 1)
+    // For 1-bit alpha, it's either 0 or 1
+    return vec4f(
+        f32(r) / 31.0,
+        f32(g) / 31.0,
+        f32(b) / 31.0,
+        f32(a)
+    );
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let c = textureLoad(myTexture, vec2(0, 0), 0);
-    let color: vec4<f32> = vec4<f32>(
-        f32(c.r) / 255.0,
-        f32(c.g) / 255.0,
-        f32(c.b) / 255.0,
-        f32(c.a) / 255.0
-    );
+    let c = gridData[0];
+    let color: vec4<f32> = unpack_bgra5551(c);
     return color;
 
     // // Normalize the fragment coordinates

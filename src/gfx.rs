@@ -1,7 +1,9 @@
+use crate::{FixedTwoDeeBuffer, TwoDeeBuffer};
 use encase::ShaderType;
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::warn;
 use wgpu::{
     BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration, Texture,
 };
@@ -9,7 +11,6 @@ use winit::application::ApplicationHandler;
 use winit::event::*;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
-use crate::TwoDeeBuffer;
 
 // Uniform buffer.
 #[derive(Debug, Default, ShaderType)] // this baby can fit so many derive macros
@@ -37,8 +38,7 @@ struct Context<'a> {
     queue: Queue,
     bind_group: BindGroup,
     uniform_buffer: Buffer,
-    texture: Texture,
-    staging: Buffer,
+    grid_buffer: Buffer,
 }
 
 pub struct App<'a> {
@@ -49,7 +49,8 @@ pub struct App<'a> {
     buf: crate::MyBuf,
 }
 
-impl<'a> App<'a> {
+// Higher level, where we wrap external state and internal gfx state.
+impl App<'_> {
     pub fn new(buf: crate::MyBuf) -> Self {
         let window = None;
         let ctx = None;
@@ -67,6 +68,8 @@ impl<'a> App<'a> {
 
 // https://github.com/rust-windowing/winit/discussions/3667#discussioncomment-9329312
 impl<'a> Context<'a> {
+    // Create from the window. Considering the window may not be created until resume, we defer
+    // like so;
     pub async fn new(window: Arc<Window>) -> Context<'a> {
         let mut size = window.inner_size();
         size.width = size.width.max(1);
@@ -91,10 +94,10 @@ impl<'a> Context<'a> {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: wgpu::Features::empty(),
-                    // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                        .using_resolution(adapter.limits()),
-                    memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    required_limits: wgpu::Limits {
+                        ..Default::default()
+                    },
+                    memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
             )
@@ -117,37 +120,11 @@ impl<'a> Context<'a> {
             mapped_at_creation: false,
         });
 
-        // Create the texure
-        let texture_size = wgpu::Extent3d {
-            width: 100,
-            height: 100,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("u8 Texture"),
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Uint,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Texture Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
+        let grid_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("double buf GPU side"),
+            size: FixedTwoDeeBuffer::<u32, 100, 100>::size() as u64, // Argh! we need to somehow pass this data in.
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         // holy boilerplate
@@ -166,18 +143,12 @@ impl<'a> Context<'a> {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -196,22 +167,15 @@ impl<'a> Context<'a> {
                     }),
                 },
                 wgpu::BindGroupEntry {
+                    // TODO: is this correct?
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &grid_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
                 },
             ],
-        });
-
-        // Need to copy into this.
-        let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Staging Buffer"),
-            size: 10000 as wgpu::BufferAddress, // TODO: Properly handle
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -257,14 +221,13 @@ impl<'a> Context<'a> {
             render_pipeline,
             queue,
             uniform_buffer,
+            grid_buffer,
             bind_group,
-            texture,
-            staging,
         }
     }
 }
 
-impl<'a> ApplicationHandler for App<'a> {
+impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             self.start = Instant::now();
@@ -283,7 +246,7 @@ impl<'a> ApplicationHandler for App<'a> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                println!("The close button was pressed; stopping");
+                warn!("The close button was pressed; stopping");
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
@@ -300,7 +263,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 }
             }
             WindowEvent::CursorMoved {
-                device_id,
+                device_id: _,
                 position,
             } => {
                 self.state.cursor_pos = Vec2 {
@@ -327,62 +290,15 @@ impl<'a> ApplicationHandler for App<'a> {
                         0,
                         &self.state.as_wgsl_bytes().expect("uhh"),
                     );
-                    //println!("Uniform: {:?}", &self.state);
-
-                    // self.buf.render(|f| {
-                    //     ctx.queue.write_buffer(&ctx.staging, 0, &f.buf);
-                    // });
 
                     let mut encoder = ctx
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
                     self.buf.render(|f| {
-                        println!("Sending, {}", f.get(0, 0).unwrap());
-                        ctx.queue.write_texture(
-                            wgpu::ImageCopyTexture {
-                                texture: &ctx.texture,
-                                mip_level: 0,
-                                origin: wgpu::Origin3d::ZERO,
-                                aspect: wgpu::TextureAspect::All,
-                            },
-                            bytemuck::cast_slice(&f.buf),
-                            wgpu::ImageDataLayout {
-                                offset: 0,
-                                bytes_per_row: Some(f.row_size() as u32),
-                                rows_per_image: Some(f.height() as u32),
-                            },
-                            wgpu::Extent3d {
-                                width: f.width() as u32,
-                                height: f.height() as u32,
-                                depth_or_array_layers: 1,
-                            },
-                        );
+                        let casted = bytemuck::cast_slice(&f.buf);
+                        ctx.queue.write_buffer(&ctx.grid_buffer, 0, casted);
                     });
-
-                    // Try write_texture instead?
-
-                    // encoder.copy_buffer_to_texture(
-                    //     wgpu::ImageCopyBuffer {
-                    //         buffer: &ctx.staging,
-                    //         layout: wgpu::ImageDataLayout {
-                    //             offset: 0,
-                    //             bytes_per_row: Some(100),
-                    //             rows_per_image: Some(100)
-                    //         },
-                    //     },
-                    //     wgpu::ImageCopyTexture {
-                    //         texture: &ctx.texture,
-                    //         mip_level: 0,
-                    //         origin: wgpu::Origin3d::ZERO,
-                    //         aspect: wgpu::TextureAspect::All
-                    //     },
-                    //     wgpu::Extent3d {
-                    //         width: 100,
-                    //         height: 100,
-                    //         depth_or_array_layers: 1,
-                    //     }
-                    // );
 
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -408,6 +324,8 @@ impl<'a> ApplicationHandler for App<'a> {
                     ctx.queue.submit(Some(encoder.finish()));
                     frame.present();
                 }
+
+                self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),
         }

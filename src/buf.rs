@@ -62,18 +62,18 @@ impl TwoDeeBuffer<u8> for SimpleTwoDeeBuffer {
 pub struct Flipper<F, T>
 where
     T: Num + Copy,
-    F: TwoDeeBuffer<T>
+    F: TwoDeeBuffer<T>,
 {
     a: Box<F>,
     b: Box<F>,
     active: AtomicPtr<F>,
-    _marker: PhantomData<T>
+    _marker: PhantomData<T>,
 }
 
 impl<F, T> Flipper<F, T>
 where
     T: Num + Copy,
-    F: TwoDeeBuffer<T>
+    F: TwoDeeBuffer<T>,
 {
     /// Internally creates 2x TwoDeeBuffers.
     pub fn new(a: F, b: F) -> Self {
@@ -82,7 +82,12 @@ where
         let active = AtomicPtr::new(a.as_mut());
         let _marker = PhantomData::default();
 
-        Self { a, b, active, _marker }
+        Self {
+            a,
+            b,
+            active,
+            _marker,
+        }
     }
 
     /// Flip front and back, to be called after every processing step.
@@ -99,7 +104,6 @@ where
     /// Buffer that is safe to read from. Use this for rendering.
     pub fn front(&self) -> &F {
         let ptr = self.active.load(Ordering::Acquire);
-        println!("front ptr is {:p}", ptr);
         // SAFETY: Enforced by the wrapper one level up, after every mutation the buffer is flipped,
         // therefor we can assure nothing is writing to this, and thus is safe to read from.
         unsafe { &*ptr }
@@ -108,7 +112,6 @@ where
     /// Buffer we process on. Used for updates.
     pub fn back(&mut self) -> &mut F {
         let active_ptr = self.active.load(Ordering::Relaxed);
-        println!("back ptr is {:p}", active_ptr);
         if active_ptr == self.a.as_mut() {
             &mut self.b
         } else {

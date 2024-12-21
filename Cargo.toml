@@ -8,9 +8,11 @@ bytemuck = "1.20.0"
 encase = { version = "0.10.0", features = ["glam"] }
 glam = "0.29.2"
 num = "0.4.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 pollster = { version = "0.4.0", features = ["macro"] }
 rand = "0.8.5"
-rayon = "1.10.0"
+#rayon = "1.10.0"
 thiserror = "2.0.7"
 wgpu = "23.0.1"
 winit = "0.30.5"
