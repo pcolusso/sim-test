@@ -236,7 +236,7 @@ impl ApplicationHandler for App<'_> {
 
             let state = pollster::block_on(Context::new(window.clone()));
             self.ctx = Some(state);
-            self.state.grid_dim = glam::uvec2(100, 100);
+            self.state.grid_dim = glam::uvec2(50, 50);
         }
     }
 

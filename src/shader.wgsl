@@ -56,12 +56,11 @@ fn unpack_bgra5551(packed: u32) -> vec4f {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let total_width = 1000.0;
-    let cell_size = total_width / f32(app_state.grid_dimensions.x) * 0.9;
-    let border_size = total_width / f32(app_state.grid_dimensions.x) * 0.1;
+    let cell_size = 20.0;
+    let border_size = 1.0;
+    let grid_dim = vec2f(app_state.grid_dimensions);
 
-    let grid_width = 100.0; // TODO: can we instead derive this from the buf, assuming it's square, or via uniform?
-
+    let grid_width = f32(app_state.grid_dimensions.x);
     let t_w = (grid_width * cell_size) + (grid_width * border_size + 1.0); // +1?
 
     // ATTEMPT: being slick
