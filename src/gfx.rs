@@ -1,11 +1,11 @@
-use crate::{FixedTwoDeeBuffer, TwoDeeBuffer};
+use crate::FixedTwoDeeBuffer;
 use encase::ShaderType;
 use glam::{vec2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::warn;
 use wgpu::{
-    BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration, Texture,
+    include_wgsl, BindGroup, Buffer, Device, Queue, RenderPipeline, Surface, SurfaceConfiguration,
 };
 use winit::application::ApplicationHandler;
 use winit::event::*;
@@ -18,6 +18,7 @@ struct State {
     pub cursor_pos: glam::Vec2,
     pub dimensions: glam::Vec2,
     pub time: f32,
+    pub grid_dim: glam::UVec2, // TODO: This is going to remain constant, so maybe a bad fit.
 }
 
 impl State {
@@ -105,12 +106,7 @@ impl<'a> Context<'a> {
             .expect("Failed to create device");
 
         // Load the shaders from disk
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "shader.wgsl"
-            ))),
-        });
+        let shader = device.create_shader_module(include_wgsl!("shader.wgsl"));
 
         // https://github.com/gfx-rs/wgpu/blob/trunk/examples/src/uniform_values/mod.rs
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -240,6 +236,7 @@ impl ApplicationHandler for App<'_> {
 
             let state = pollster::block_on(Context::new(window.clone()));
             self.ctx = Some(state);
+            self.state.grid_dim = glam::uvec2(100, 100);
         }
     }
 

@@ -1,7 +1,8 @@
 struct State {
-    pos: vec2<f32>,
-    dim: vec2<f32>,
-    t: f32,
+    pos: vec2<f32>, // cursor position
+    dim: vec2<f32>, // window dimensions
+    t: f32,         // time
+    grid_dimensions: vec2<u32>
 }
 
 struct VertexInput {
@@ -19,7 +20,7 @@ var<uniform> app_state: State;
 
 @group(0)
 @binding(1)
-var<storage> gridData: array<u32>;
+var<storage> grid_data: array<u32>;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
@@ -55,22 +56,41 @@ fn unpack_bgra5551(packed: u32) -> vec4f {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let cell_size = 7.0;
-    let border_size = 3.0;
+    let total_width = 1000.0;
+    let cell_size = total_width / f32(app_state.grid_dimensions.x) * 0.9;
+    let border_size = total_width / f32(app_state.grid_dimensions.x) * 0.1;
+
     let grid_width = 100.0; // TODO: can we instead derive this from the buf, assuming it's square, or via uniform?
 
-    let t_w = (grid_width * cell_size) + (grid_width * border_size); // +1?
+    let t_w = (grid_width * cell_size) + (grid_width * border_size + 1.0); // +1?
 
     // ATTEMPT: being slick
-    let total_dimensions: vec2<f32> = vec2(t_w, t_w); // square for now.
-    let offset: vec2<f32> = (app_state.dim - total_dimensions) / 2.0;
+    //let total_dimensions = vec2(f32(app_state.grid_dimensions.x), f32(app_state.grid_dimensions.y)); // square for now.
+    let total_dimensions = vec2(t_w, t_w);
+    // We want to center the grid, so we calculate where coords should start.
+    let offset = (app_state.dim - total_dimensions) / 2.0;
+    // Translate to grid space
     let grid_pos = in.pos.xy - offset;
-    let outside: vec2<bool> = grid_pos < vec2<f32>(0.0) || grid_pos >= total_dimensions;
+    let outside = grid_pos < vec2<f32>(0.0) || grid_pos >= total_dimensions;
 
     // render background
     if (any(outside)) { // THIS IS COOL
-        return vec4(0.0, 1.0, 0.0, 1.0);
+        return vec4(0.14, 0.2, 0.52, 1.0);
     }
 
-    return vec4(1.0, 1.0, 1.0, 1.0);
+    let cell_and_border = cell_size + border_size;
+    // Get x/y of each cell.
+    let grid_coord = floor(grid_pos / cell_and_border);
+    // Translate to cell space
+    let local = grid_pos - (grid_coord * cell_and_border);
+    let is_border = local < vec2(border_size, border_size);
+
+    if (any(is_border)) {
+        return vec4(1.0, 1.0, 1.0, 0.1);
+    }
+
+    let grid_idx = u32(grid_coord.y * 50 + grid_coord.x);
+    let value = grid_data[grid_idx];
+
+    return unpack_bgra5551(value);
 }
